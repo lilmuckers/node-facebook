@@ -2,7 +2,7 @@
 var querystring	= require('querystring'),
 	crypto 	= require('crypto'),
 	https 	= require('https'),
-	url 	= require('url');
+	URL 	= require('url');
 
 
 var Facebook = function(appId, appSecret, callbackUrl){
@@ -39,43 +39,43 @@ Facebook.prototype.importResponse = function(res){
 	return this;
 }
 Facebook.prototype._getAccessToken = function(callback){
-	if(!this.accessToken){
-		var data = {
-			client_id	: this.appId,
-			redirect_uri	: this.callbackUrl,
-			client_secret	: this.appSecret,
-			code		: this.code
-		};
-		this._send(this.accessUrl, data, 'GET', function(err, data){
-			if(err){
-				throw new Error(err);
-			}
-			var results;
-			try{
-				results = JSON.parse(data);
-			} catch(e) {
-				results = querystring.parse(data);
-			}
-			this.accessToken = results['access_token'];
-			this.refreshToken = results['refresh_token'];
-			callback(this.accessToken, this.refreshToken);
-		}.bind(this));
-		return this;
-	}
-	callback(this.accessToken, this.refreshToken);
+	var data = {
+		client_id	: this.appId,
+		redirect_uri	: this.callbackUrl,
+		client_secret	: this.appSecret,
+		code		: this.code
+	};
+	this._send(this.accessUrl, data, 'GET', function(err, data){
+		if(err){
+			throw new Error(err);
+		}
+		var results;
+		try{
+			results = JSON.parse(data);
+		} catch(e) {
+			results = querystring.parse(data);
+		}
+		this.accessToken = results['access_token'];
+		this.refreshToken = results['refresh_token'];
+		callback(this.accessToken, this.refreshToken);
+	}.bind(this));
 	return this;
 }
-Facebook.prototype.get = function(url, query, callback){
-	this._getAccessToken(function(accessToken, refreshToken){
-		query['access_token'] = accessToken;
-		this._send(url, query, callback);
+Facebook.prototype.get = function(accessToken, url, query, callback, method){
+	if(!query) query = {};
+	query['access_token'] = accessToken;
+	this._send(url, query, method ? method : 'GET', function(err, result, response){
+		if(!err){
+			result = JSON.parse(result);
+		}
+		callback(err, result, response);
 	});
 }
 Facebook.prototype._send = function(url, query, method, callback){
 	var creds = crypto.createCredentials({});
 	
 	//perform transforms on the url data to make it work
-	var parsedUrl = url.parse(url, true);
+	var parsedUrl = URL.parse(url, true);
 	if(!method) method = 'GET';
 	if(parsedUrl.protocol == 'https:' && !parsedUrl.port) parsedUrl.port = 443;
 	
@@ -142,7 +142,6 @@ Facebook.prototype.processSignedRequest = function(signedRequest){
 	hmac.update(payload);
 	var expectedSignature = hmac.digest('base64');
 	if(reqSignature != expectedSignature){
-		console.log(reqSignature, expectedSignature);
 		throw new Error('Invalid signature sent');
 	}
 	
@@ -154,17 +153,41 @@ exports.facebook = Facebook;
 
 function FacebookAPI(fbObj){
 	this.fb = fbObj;
+	this._graphBaseUrl = 'https://graph.facebook.com/';
+}
+FacebookAPI.prototype.getUser = function(userId, callback){
+	var url = this._graphBaseUrl;
+	if(userId){
+		url += userId;
+	} else {
+		url += 'me';
+	}
+	this.fb.get(this.accessToken, url, null, callback);
 }
 
 exports.facebookapi = FacebookAPI;
 
 exports.canvas = function(fbObj){
-	var fbapi = new FacebookAPI(fbObj);
 	return function(req, res, next){
 		var signedRequest = req.param('signed_request', false);
-		if(signedRequest){
-			var data = fbObj.processSignedRequest(signedRequest);
+		if(signedRequest || req.session.accessToken){
+			if(signedRequest){
+				var data = fbObj.processSignedRequest(signedRequest);
+				if(data['oauth_token']){
+					req.session.accessToken = data['oauth_token'];
+				}
+			} else if (req.session.accessToken){
+				var data = {};
+			}
 			
+			var fbapi = new FacebookAPI(fbObj);
+			fbapi.accessToken = req.session.accessToken;
+
+			//set the access token data if it's available
+			if(data['oauth_token']){
+				req.session.accessToken = data['oauth_token'];
+			}
+
 			//add a facebook object to the request object
 			var fb = {};
 			if(!data.user_id){
@@ -174,6 +197,7 @@ exports.canvas = function(fbObj){
 					res.end('<script type="text/javascript">top.location.href = "'+url+'";</script>');	
 				}
 			} else {
+				fb.accessToken = req.session.accessToken;
 				fb.authed = true;
 			}
 			for(var k in data){
