@@ -208,8 +208,9 @@ exports.canvas = function(fbObj, autoAuth){
 			fb.api = fbapi;
 			req.fb = fb;
 			
-			if(signedRequest && autoAuth){
+			if(signedRequest && autoAuth && !req.fb.authed){
 				req.fb.authenticate(autoAuth);
+				return;
 			}
 		}
 		next();
