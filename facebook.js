@@ -112,8 +112,56 @@ facebook.prototype._send = function(url, query, method, callback){
 	});
 	request.end();
 }
+facebook.prototype.base64UrlToBase64 = function(str){
+	var padding = (4-(str.length%4));
+	for(var i = 0; i < padding; i++){
+		str = str+'=';
+	}
+	return str.replace(/\-/g, '+').replace(/_/g, '/');
+}
+facebook.prototype.base64UrlDecode = function(encoded){
+	var enc = this.base64UrlToBase64(encoded);
+	return (new Buffer(enc || '', 'base64')).toString('ascii');
+}
+facebook.prototype.processSignedRequest = function(signedRequest){
+	var data = signedRequest.split('.');
+	var reqSignature = this.base64UrlToBase64(data[0]);
+	var payload = data[1];
+	
+	//decode the payload
+	data = this.base64UrlDecode(payload);
+	data = JSON.parse(data);
 
-
+	//check the encoding algorithm
+	if(data.algorithm.toUpperCase() !== 'HMAC-SHA256'){
+		throw new Error('Unknown signature algorithm. Expected HMAC-SHA256');
+	}
+	
+	//verify the request
+	var hmac = crypto.createHmac('sha256', this.appSecret);
+	hmac.update(payload);
+	var expectedSignature = hmac.digest('base64');
+	if(reqSignature != expectedSignature){
+		console.log(reqSignature, expectedSignature);
+		throw new Error('Invalid signature sent');
+	}
+	
+	//This request was validated successfully - hooray!
+	//give back the decoded data
+	return data;	
+}
 exports.facebook = facebook;
+
+exports.canvas = function(fbObj){
+	return function(req, res, next){
+		var signedRequest = req.param('signed_request', false);
+		if(signedRequest){
+			var data = fbObj.processSignedRequest(signedRequest);
+			console.log(data);
+		}
+		next();
+	}
+};
+
 
 
