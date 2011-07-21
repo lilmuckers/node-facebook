@@ -167,7 +167,7 @@ FacebookAPI.prototype.getUser = function(userId, callback){
 
 exports.facebookapi = FacebookAPI;
 
-exports.canvas = function(fbObj){
+exports.canvas = function(fbObj, autoAuth){
 	return function(req, res, next){
 		var signedRequest = req.param('signed_request', false);
 		if(signedRequest || req.session.accessToken){
@@ -207,6 +207,10 @@ exports.canvas = function(fbObj){
 			}
 			fb.api = fbapi;
 			req.fb = fb;
+			
+			if(signedRequest && autoAuth){
+				req.fb.authenticate(autoAuth);
+			}
 		}
 		next();
 	}
