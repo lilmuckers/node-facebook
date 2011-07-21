@@ -5,14 +5,14 @@ var querystring	= require('querystring'),
 	url 	= require('url');
 
 
-var facebook = function(appId, appSecret, callbackUrl){
+var Facebook = function(appId, appSecret, callbackUrl){
 	this.appId = appId;
 	this.appSecret = appSecret;
 	this.callbackUrl = callbackUrl;
 	this.authUrl = 'https://www.facebook.com/dialog/oauth';
 	this.accessUrl = 'https://graph.facebook.com/oauth/access_token';
 }
-facebook.prototype.getAuthUrl = function(scope){
+Facebook.prototype.getAuthUrl = function(scope){
 	if(typeof scope == 'object'){
 		var scope = scope.join(',');
 	} else {
@@ -26,7 +26,7 @@ facebook.prototype.getAuthUrl = function(scope){
 	var query = querystring.stringify(data);
 	return this.authUrl + '?' + query;
 }
-facebook.prototype.importResponse = function(res){
+Facebook.prototype.importResponse = function(res){
 	//check if there was an error from facebook.
 	if(req.param('error_reason', false)){
 		throw new Error(req.param('error_description', 'There was an unknown error at Facebook'));
@@ -38,7 +38,7 @@ facebook.prototype.importResponse = function(res){
 	}
 	return this;
 }
-facebook.prototype._getAccessToken = function(callback){
+Facebook.prototype._getAccessToken = function(callback){
 	if(!this.accessToken){
 		var data = {
 			client_id	: this.appId,
@@ -65,13 +65,13 @@ facebook.prototype._getAccessToken = function(callback){
 	callback(this.accessToken, this.refreshToken);
 	return this;
 }
-facebook.prototype.get = function(url, query, callback){
+Facebook.prototype.get = function(url, query, callback){
 	this._getAccessToken(function(accessToken, refreshToken){
 		query['access_token'] = accessToken;
 		this._send(url, query, callback);
 	});
 }
-facebook.prototype._send = function(url, query, method, callback){
+Facebook.prototype._send = function(url, query, method, callback){
 	var creds = crypto.createCredentials({});
 	
 	//perform transforms on the url data to make it work
@@ -112,18 +112,18 @@ facebook.prototype._send = function(url, query, method, callback){
 	});
 	request.end();
 }
-facebook.prototype.base64UrlToBase64 = function(str){
+Facebook.prototype.base64UrlToBase64 = function(str){
 	var padding = (4-(str.length%4));
 	for(var i = 0; i < padding; i++){
 		str = str+'=';
 	}
 	return str.replace(/\-/g, '+').replace(/_/g, '/');
 }
-facebook.prototype.base64UrlDecode = function(encoded){
+Facebook.prototype.base64UrlDecode = function(encoded){
 	var enc = this.base64UrlToBase64(encoded);
 	return (new Buffer(enc || '', 'base64')).toString('ascii');
 }
-facebook.prototype.processSignedRequest = function(signedRequest){
+Facebook.prototype.processSignedRequest = function(signedRequest){
 	var data = signedRequest.split('.');
 	var reqSignature = this.base64UrlToBase64(data[0]);
 	var payload = data[1];
@@ -150,14 +150,39 @@ facebook.prototype.processSignedRequest = function(signedRequest){
 	//give back the decoded data
 	return data;	
 }
-exports.facebook = facebook;
+exports.facebook = Facebook;
+
+function FacebookAPI(fbObj){
+	this.fb = fbObj;
+}
+
+exports.facebookapi = FacebookAPI;
 
 exports.canvas = function(fbObj){
+	var fbapi = new FacebookAPI(fbObj);
 	return function(req, res, next){
 		var signedRequest = req.param('signed_request', false);
 		if(signedRequest){
 			var data = fbObj.processSignedRequest(signedRequest);
-			console.log(data);
+			
+			//add a facebook object to the request object
+			var fb = {};
+			if(!data.user_id){
+				fb.authed = false;
+				fb.authenticate = function(scope){
+					var url = fbObj.getAuthUrl(scope);
+					res.end('<script type="text/javascript">top.location.href = "'+url+'";</script>');	
+				}
+			} else {
+				fb.authed = true;
+			}
+			for(var k in data){
+				if(k != 'oauth_token' && k != 'expires' && k != 'algorithm' && k != 'issued_at'){
+					fb[k] = data[k];
+				}
+			}
+			fb.api = fbapi;
+			req.fb = fb;
 		}
 		next();
 	}
